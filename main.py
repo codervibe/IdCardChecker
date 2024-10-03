@@ -15,6 +15,10 @@ parser.add_argument('--sex', '-s', type=str, choices=["男", "女"], required=Tr
 
 # 解析命令行参数
 args = parser.parse_args()
+if len(args.__dict__) == 0:
+    parser.print_help()
+    exit()
+
 
 # 获取用户输入
 idcard_prefix = args.idcard_prefix
